@@ -9,6 +9,8 @@ multithreading primitives like mutexes and locks are only bound to the protected
 easy to introduce bugs in your code by forgetting to use the right locks before accessing a block of data. The idea of this
 library is to tie the data and the locks in a type safe interface that only allows correct usage.
 
+This fork was modified as part of the [HELICS](https://github.com/GMLC-TDC/HELICS-src) project to include a atomic_guarded and staged_guarded
+and use a dedicated handle object to remove restrictions on which mutexes can be used with different guarded classes and allow move assignment
 
 ### System Requirements
 
