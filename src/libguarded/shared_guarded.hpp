@@ -10,20 +10,24 @@
 *
 ***********************************************************************/
 
+/*
+Copyright © 2017-2018,
+Battelle Memorial Institute; Lawrence Livermore National Security, LLC; Alliance for Sustainable Energy, LLC
+All rights reserved. See LICENSE file and DISCLAIMER for more details.
+*/
+/*
+additions include overloads for std::mutex and std::timed_mutex
+*/
+
 #ifndef LIBGUARDED_SHARED_GUARDED_HPP
 #define LIBGUARDED_SHARED_GUARDED_HPP
 
 #include <memory>
+#include <type_traits>
 
-#if HAVE_CXX14
 #include <shared_mutex>
-#else
-namespace std
-{
-class shared_timed_mutex;
-}
-#endif
 
+#include "handles.hpp"
 namespace libguarded
 {
 
@@ -40,22 +44,24 @@ namespace libguarded
    The handle returned by the various lock methods is moveable but not
    copyable.
 */
+#ifdef LIBGUARDED_NO_DEFAULT
+template <typename T, typename M>
+class shared_guarded
+#else
 template <typename T, typename M = std::shared_timed_mutex>
 class shared_guarded
+#endif
 {
-  private:
-    class deleter;
-    class shared_deleter;
-
-  public:
-    using handle        = std::unique_ptr<T, deleter>;
-    using shared_handle = std::unique_ptr<const T, shared_deleter>;
-
+private:
+    using handle = lock_handle<T, M>;
+    using shared_handle = shared_lock_handle<T, M>;
+public:
     template <typename... Us>
     shared_guarded(Us &&... data);
 
     // exclusive access
     handle lock();
+    shared_handle lock() const;
     handle try_lock();
 
     template <class Duration>
@@ -74,47 +80,7 @@ class shared_guarded
     template <class TimePoint>
     shared_handle try_lock_shared_until(const TimePoint & timepoint) const;
 
-  private:
-    class deleter
-    {
-      public:
-        using pointer = T *;
-
-        deleter(M & mutex) : m_deleter_mutex(mutex)
-        {
-        }
-
-        void operator()(T * ptr)
-        {
-            if (ptr) {
-                m_deleter_mutex.unlock();
-            }
-        }
-
-      private:
-        M & m_deleter_mutex;
-    };
-
-    class shared_deleter
-    {
-      public:
-        using pointer = const T *;
-
-        shared_deleter(M & mutex) : m_deleter_mutex(mutex)
-        {
-        }
-
-        void operator()(const T * ptr)
-        {
-            if (ptr) {
-                m_deleter_mutex.unlock_shared();
-            }
-        }
-
-      private:
-        M & m_deleter_mutex;
-    };
-
+private:
     T         m_obj;
     mutable M m_mutex;
 };
@@ -126,82 +92,61 @@ shared_guarded<T, M>::shared_guarded(Us &&... data) : m_obj(std::forward<Us>(dat
 }
 
 template <typename T, typename M>
-auto shared_guarded<T, M>::lock() -> handle
+auto shared_guarded<T, M>::lock() ->handle
 {
-    m_mutex.lock();
-    return handle(&m_obj, deleter(m_mutex));
+    return handle(&m_obj, m_mutex);
 }
 
 template <typename T, typename M>
-auto shared_guarded<T, M>::try_lock() -> handle
+auto shared_guarded<T, M>::lock() const ->shared_handle
 {
-    if (m_mutex.try_lock()) {
-        return handle(&m_obj, deleter(m_mutex));
-    } else {
-        return handle(nullptr, deleter(m_mutex));
-    }
+    return shared_handle(&m_obj, m_mutex);
+}
+
+template <typename T, typename M>
+auto shared_guarded<T, M>::try_lock() ->handle
+{
+    return try_lock_handle(&m_obj, m_mutex);
 }
 
 template <typename T, typename M>
 template <typename Duration>
-auto shared_guarded<T, M>::try_lock_for(const Duration & duration) -> handle
+auto shared_guarded<T, M>::try_lock_for(const Duration & duration) ->handle
 {
-    if (m_mutex.try_lock_for(duration)) {
-        return handle(&m_obj, deleter(m_mutex));
-    } else {
-        return handle(nullptr, deleter(m_mutex));
-    }
+    return try_lock_handle_for(&m_obj, m_mutex, duration);
 }
 
 template <typename T, typename M>
 template <typename TimePoint>
-auto shared_guarded<T, M>::try_lock_until(const TimePoint & timepoint) -> handle
+auto shared_guarded<T, M>::try_lock_until(const TimePoint & timepoint) ->handle
 {
-    if (m_mutex.try_lock_until(timepoint)) {
-        return handle(&m_obj, deleter(m_mutex));
-    } else {
-        return handle(nullptr, deleter(m_mutex));
-    }
+    return try_lock_handle_until(&m_obj, m_mutex, timepoint);
 }
 
 template <typename T, typename M>
-auto shared_guarded<T, M>::lock_shared() const -> shared_handle
+auto shared_guarded<T, M>::lock_shared() const ->shared_handle
 {
-    m_mutex.lock_shared();
-    return shared_handle(&m_obj, shared_deleter(m_mutex));
+    return shared_handle(&m_obj, m_mutex);
 }
 
 template <typename T, typename M>
-auto shared_guarded<T, M>::try_lock_shared() const -> shared_handle
+auto shared_guarded<T, M>::try_lock_shared() const ->shared_handle
 {
-    if (m_mutex.try_lock_shared()) {
-        return shared_handle(&m_obj, shared_deleter(m_mutex));
-    } else {
-        return shared_handle(nullptr, shared_deleter(m_mutex));
-    }
+    return try_lock_shared_handle(&m_obj, m_mutex);
 }
 
 template <typename T, typename M>
 template <typename Duration>
-auto shared_guarded<T, M>::try_lock_shared_for(const Duration & d) const -> shared_handle
+auto shared_guarded<T, M>::try_lock_shared_for(const Duration & d) const ->shared_handle
 {
-    if (m_mutex.try_lock_shared_for(d)) {
-        return shared_handle(&m_obj, shared_deleter(m_mutex));
-    } else {
-        return shared_handle(nullptr, shared_deleter(m_mutex));
-    }
+    return try_lock_shared_handle_for(&m_obj, m_mutex, d);
 }
 
 template <typename T, typename M>
 template <typename TimePoint>
 auto shared_guarded<T, M>::try_lock_shared_until(const TimePoint & tp) const -> shared_handle
 {
-    if (m_mutex.try_lock_shared_until(tp)) {
-        return shared_handle(&m_obj, shared_deleter(m_mutex));
-    } else {
-        return shared_handle(nullptr, shared_deleter(m_mutex));
-    }
+    return try_lock_shared_handle_until(&m_obj, m_mutex, tp);
 }
-}
-
+} //namespace libguarded
 #endif

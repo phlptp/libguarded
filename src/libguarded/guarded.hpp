@@ -10,11 +10,21 @@
 *
 ***********************************************************************/
 
+/*
+Copyright © 2017-2018,
+Battelle Memorial Institute; Lawrence Livermore National Security, LLC; Alliance for Sustainable Energy, LLC
+All rights reserved. See LICENSE file and DISCLAIMER for more details.
+*/
+/*
+additions include load store operations and operator= functions
+*/
 #ifndef LIBGUARDED_GUARDED_HPP
 #define LIBGUARDED_GUARDED_HPP
 
 #include <memory>
 #include <mutex>
+#include <type_traits>
+#include "handles.hpp"
 
 namespace libguarded
 {
@@ -36,12 +46,9 @@ namespace libguarded
 template <typename T, typename M = std::mutex>
 class guarded
 {
-  private:
-    class deleter;
-
+private:
+    using handle = lock_handle<T, M>;
   public:
-    using handle = std::unique_ptr<T, deleter>;
-
     /**
      Construct a guarded object. This constructor will accept any
      number of parameters, all of which are forwarded to the
@@ -100,27 +107,33 @@ class guarded
     template <class TimePoint>
     handle try_lock_until(const TimePoint &timepoint);
 
-  private:
-    class deleter
+    /** generate a copy of the protected object
+    */
+    std::conditional_t<std::is_copy_assignable<T>::value,T,void> load()
     {
-      public:
-        using pointer = T *;
+        std::lock_guard<M> glock(m_mutex);
+        auto retObj= std::conditional_t<std::is_copy_assignable<T>::value, T, void>(m_obj);
+        return retObj;
 
-        deleter(std::unique_lock<M> lock) : m_lock(std::move(lock))
-        {
-        }
+    }
 
-        void operator()(T *ptr)
-        {
-            if (m_lock.owns_lock()) {
-                m_lock.unlock();
-            }
-        }
+    /** store an updated value into the object*/
+    template <typename objType>
+     void store(objType &&newObj)
+    { //uses a forwarding reference
+        std::lock_guard<M> glock(m_mutex);
+        m_obj = std::forward<objType>(newObj);
+    }
 
-      private:
-        std::unique_lock<M> m_lock;
-    };
+    /** store an updated value into the object*/
+    template <typename objType>
+    void operator=(objType &&newObj)
+    { //uses a forwarding reference
+        std::lock_guard<M> glock(m_mutex);
+        m_obj = std::forward<objType>(newObj);
+    }
 
+  private:
     T m_obj;
     M m_mutex;
 };
@@ -134,47 +147,29 @@ guarded<T, M>::guarded(Us &&... data) : m_obj(std::forward<Us>(data)...)
 template <typename T, typename M>
 auto guarded<T, M>::lock() -> handle
 {
-    std::unique_lock<M> lock(m_mutex);
-    return handle(&m_obj, deleter(std::move(lock)));
+    return handle(&m_obj, m_mutex);
 }
 
 template <typename T, typename M>
 auto guarded<T, M>::try_lock() -> handle
 {
-    std::unique_lock<M> lock(m_mutex, std::try_to_lock);
-
-    if (lock.owns_lock()) {
-        return handle(&m_obj, deleter(std::move(lock)));
-    } else {
-        return handle(nullptr, deleter(std::move(lock)));
-    }
+    return try_lock_handle(&m_obj, m_mutex);
 }
 
 template <typename T, typename M>
 template <typename Duration>
-auto guarded<T, M>::try_lock_for(const Duration &d) -> handle
+auto guarded<T, M>::try_lock_for(const Duration &d) ->handle
 {
-    std::unique_lock<M> lock(m_mutex, d);
-
-    if (lock.owns_lock()) {
-        return handle(&m_obj, deleter(std::move(lock)));
-    } else {
-        return handle(nullptr, deleter(std::move(lock)));
-    }
+    return try_lock_handle_for(&m_obj, m_mutex,d);
 }
 
 template <typename T, typename M>
 template <typename TimePoint>
-auto guarded<T, M>::try_lock_until(const TimePoint &tp) -> handle
+auto guarded<T, M>::try_lock_until(const TimePoint &tp) ->handle
 {
-    std::unique_lock<M> lock(m_mutex, tp);
-
-    if (lock.owns_lock()) {
-        return handle(&m_obj, deleter(std::move(lock)));
-    } else {
-        return handle(nullptr, deleter(std::move(lock)));
-    }
+    return try_lock_handle_until(&m_obj, m_mutex,tp);
 }
+
 }
 
 #endif

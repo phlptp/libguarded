@@ -10,6 +10,12 @@
 *
 ***********************************************************************/
 
+/*
+Copyright © 2017-2018,
+Battelle Memorial Institute; Lawrence Livermore National Security, LLC; Alliance for Sustainable Energy, LLC
+All rights reserved. See LICENSE file and DISCLAIMER for more details.
+*/
+
 #ifndef LIBGUARDED_DEFERRED_GUARDED_HPP
 #define LIBGUARDED_DEFERRED_GUARDED_HPP
 
@@ -19,15 +25,8 @@
 #include <future>
 #include <memory>
 #include <vector>
-
-#if HAVE_CXX14
 #include <shared_mutex>
-#else
-namespace std
-{
-class shared_timed_mutex;
-}
-#endif
+#include "handles.hpp"
 
 namespace libguarded
 {
@@ -48,15 +47,16 @@ typename std::add_lvalue_reference<T>::type declref();
    The shared_handle returned by the various lock methods is moveable
    but not copyable.
 */
+#ifdef LIBGUARDED_NO_DEFAULT
+template <typename T, typename M>
+class deferred_guarded
+#else
 template <typename T, typename M = std::shared_timed_mutex>
 class deferred_guarded
+#endif
 {
-  private:
-    class shared_deleter;
-
+  
   public:
-    using shared_handle = std::unique_ptr<const T, shared_deleter>;
-
     template <typename... Us>
     deferred_guarded(Us &&... data);
 
@@ -76,27 +76,16 @@ class deferred_guarded
     template <class TimePoint>
     shared_handle try_lock_shared_until(const TimePoint & timepoint) const;
 
-  private:
-    class shared_deleter
+    /** generate a copy of the protected object
+    */
+    std::enable_if_t<std::is_copy_constructible<T>::value, T> load() const
     {
-      public:
-        using pointer = const T *;
-
-        shared_deleter(M & mutex) : m_deleter_mutex(mutex)
-        {
-        }
-
-        void operator()(const T * ptr)
-        {
-            if (ptr) {
-                m_deleter_mutex.unlock_shared();
-            }
-        }
-
-      private:
-        M & m_deleter_mutex;
-    };
-
+        auto handle = lock_shared();
+        T newObj(*handle);
+        return newObj;
+    }
+  private:
+   
     void do_pending_writes() const;
 
     mutable T m_obj;
@@ -254,19 +243,14 @@ template <typename T, typename M>
 auto deferred_guarded<T, M>::lock_shared() const -> shared_handle
 {
     do_pending_writes();
-    m_mutex.lock_shared();
-    return shared_handle(&m_obj, shared_deleter(m_mutex));
+    return shared_handle(&m_obj, m_mutex);
 }
 
 template <typename T, typename M>
 auto deferred_guarded<T, M>::try_lock_shared() const -> shared_handle
 {
     do_pending_writes();
-    if (m_mutex.try_lock_shared()) {
-        return shared_handle(&m_obj, shared_deleter(m_mutex));
-    } else {
-        return shared_handle(nullptr, shared_deleter(m_mutex));
-    }
+    return try_lock_shared_handle(&m_obj, m_mutex);
 }
 
 template <typename T, typename M>
@@ -274,11 +258,7 @@ template <typename Duration>
 auto deferred_guarded<T, M>::try_lock_shared_for(const Duration & d) const -> shared_handle
 {
     do_pending_writes();
-    if (m_mutex.try_lock_shared_for(d)) {
-        return shared_handle(&m_obj, shared_deleter(m_mutex));
-    } else {
-        return shared_handle(nullptr, shared_deleter(m_mutex));
-    }
+    return try_lock_shared_handle_for(&m_obj, m_mutex, d);
 }
 
 template <typename T, typename M>
@@ -286,11 +266,7 @@ template <typename TimePoint>
 auto deferred_guarded<T, M>::try_lock_shared_until(const TimePoint & tp) const -> shared_handle
 {
     do_pending_writes();
-    if (m_mutex.try_lock_shared_until(tp)) {
-        return shared_handle(&m_obj, shared_deleter(m_mutex));
-    } else {
-        return shared_handle(nullptr, shared_deleter(m_mutex));
-    }
+    return try_lock_shared_handle_until(&m_obj, m_mutex, timepoint);
 }
 }
 #endif

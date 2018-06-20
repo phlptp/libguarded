@@ -144,11 +144,11 @@ class rcu_list
         node *zombie_node{nullptr};
     };
 
-    using alloc_trait        = std::allocator_traits<Alloc>;
-    using node_alloc_t       = typename alloc_trait::template rebind_alloc<node>;
-    using node_alloc_trait   = std::allocator_traits<node_alloc_t>;
-    using zombie_alloc_t     = typename alloc_trait::template rebind_alloc<zombie_list_node>;
-    using zombie_alloc_trait = std::allocator_traits<zombie_alloc_t>;
+    using alloc_trait             = std::allocator_traits<Alloc>;
+    using node_alloc_t            = typename alloc_trait::template rebind_alloc<node>;
+    using node_alloc_trait        = std::allocator_traits<node_alloc_t>;
+    using zombie_alloc_t          = typename alloc_trait::template rebind_alloc<zombie_list_node>;
+    using zombie_alloc_trait      = std::allocator_traits<zombie_alloc_t>;
 
     std::atomic<node *> m_head{nullptr};
     std::atomic<node *> m_tail{nullptr};
@@ -157,7 +157,7 @@ class rcu_list
 
     M m_write_mutex;
 
-    mutable node_alloc_t m_node_alloc;
+    mutable node_alloc_t   m_node_alloc;
     mutable zombie_alloc_t m_zombie_alloc;
 };
 
@@ -170,9 +170,9 @@ namespace detail
 template <typename Alloc>
 class deallocator
 {
-    using allocator_type   = Alloc;
+    using allocator_type = Alloc;
     using allocator_traits = std::allocator_traits<allocator_type>;
-    using pointer          = typename allocator_traits::pointer;
+    using pointer = typename allocator_traits::pointer;
 
     allocator_type alloc;
 
@@ -193,7 +193,7 @@ template <typename T, typename Alloc, typename... Args>
 std::unique_ptr<T, deallocator<Alloc>> allocate_unique(Alloc &alloc, Args &&... args)
 {
     using allocator_traits = std::allocator_traits<Alloc>;
-    auto p                 = allocator_traits::allocate(alloc, 1);
+    auto p = allocator_traits::allocate(alloc, 1);
     try {
         allocator_traits::construct(alloc, p, std::forward<Args>(args)...);
         return {p, deallocator<Alloc>{alloc}};
@@ -231,8 +231,8 @@ template <typename T, typename M, typename Alloc>
 void rcu_list<T, M, Alloc>::rcu_guard::rcu_read_lock(const rcu_list<T, M, Alloc> &list)
 
 {
-    m_list   = &list;
-    m_zombie = zombie_alloc_trait::allocate(list.m_zombie_alloc, 1);
+    m_list                    = &list;
+    m_zombie                  = zombie_alloc_trait::allocate(list.m_zombie_alloc, 1);
     zombie_alloc_trait::construct(list.m_zombie_alloc, m_zombie, this);
     zombie_list_node *oldNext = list.m_zombie_head.load(std::memory_order_relaxed);
 
